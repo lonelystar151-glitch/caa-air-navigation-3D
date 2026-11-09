@@ -1,0 +1,1463 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>مجسم دائرة الملاحة الجوية والمطار | هيئة الطيران المدني CAA</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Fonts: Cairo & Tajawal -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&family=Tajawal:wght@500;700;800&display=swap" rel="stylesheet">
+    <!-- Three.js & OrbitControls -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        cairo: ['Cairo', 'sans-serif'],
+                        tajawal: ['Tajawal', 'sans-serif'],
+                    },
+                    colors: {
+                        caa: {
+                            gold: '#D4AF37',
+                            green: '#005A36',
+                            emerald: '#059669',
+                            dark: '#060B12',
+                            panel: 'rgba(10, 18, 28, 0.92)',
+                            border: 'rgba(255, 255, 255, 0.12)',
+                            accent: '#06B6D4'
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        /* إيقاف أي سلوك لمسي متداخل لضمان تحكم 3D مطلق على الهواتف */
+        html, body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #060B12;
+            font-family: 'Cairo', 'Tajawal', sans-serif;
+            touch-action: none;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        #webgl-canvas {
+            position: fixed;
+            inset: 0;
+            width: 100vw;
+            height: 100vh;
+            display: block;
+            touch-action: none;
+            z-index: 0;
+            outline: none;
+        }
+
+        /* حاويات الواجهة العائمة بدون اعتراض أحداث اللمس والتدوير */
+        .overlay-layer {
+            pointer-events: none;
+        }
+        .interactive-btn, .interactive-card {
+            pointer-events: auto;
+        }
+
+        /* Glassmorphism Styling */
+        .glass-dock {
+            background: rgba(11, 20, 32, 0.88);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            box-shadow: 0 12px 36px rgba(0, 0, 0, 0.55);
+        }
+
+        /* علامات الأجهزة ثلاثية الأبعاد (3D Floating Badges) */
+        .device-pin {
+            position: absolute;
+            transform: translate(-50%, -100%);
+            pointer-events: auto;
+            cursor: pointer;
+            transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.2s ease;
+            white-space: nowrap;
+            z-index: 10;
+        }
+        .device-pin:hover {
+            transform: translate(-50%, -115%) scale(1.08);
+        }
+
+        /* شريط التمرير */
+        ::-webkit-scrollbar {
+            width: 4px;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(6, 182, 212, 0.5);
+            border-radius: 8px;
+        }
+    </style>
+</head>
+<body class="text-slate-100 overflow-hidden">
+
+    <!-- 3D WebGL Canvas الرئيسي يغطي 100% من الشاشة -->
+    <canvas id="webgl-canvas"></canvas>
+
+    <!-- حاوية العلامات ثلاثية الأبعاد العائمة (3D Pin Markers Container) -->
+    <div id="labels-container" class="fixed inset-0 pointer-events-none z-10 overflow-hidden"></div>
+
+    <!-- ========================================================================
+         1. شريط الرأس العلوي النحيف (HUD Header)
+         ======================================================================== -->
+    <header class="fixed top-0 left-0 right-0 z-20 p-2 sm:p-3 overlay-layer">
+        <div class="max-w-7xl mx-auto flex items-center justify-between gap-2">
+            
+            <!-- الشعار وهوية هيئة الطيران المدني CAA -->
+            <div class="glass-dock interactive-btn rounded-xl px-3 py-1.5 flex items-center gap-2.5 border-r-4 border-r-emerald-500 shadow-lg">
+                <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-emerald-600 to-teal-800 flex items-center justify-center text-white shadow-md">
+                    <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                        <path d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"/>
+                    </svg>
+                </div>
+                <div>
+                    <h1 class="font-extrabold text-xs sm:text-sm text-white tracking-wide">مجسم دائرة الملاحة الجوية والمطار</h1>
+                    <p class="text-[10px] text-emerald-400 font-semibold font-mono">CAA OMAN • 3D DIGITAL TWIN</p>
+                </div>
+            </div>
+
+            <!-- أزرار الإعدادات السريعة (علامات، إضاءة، صوت، ودليل الأجهزة) -->
+            <div class="flex items-center gap-1.5">
+                <!-- زر تبديل علامات الأجهزة 3D Pins -->
+                <button id="btn-toggle-labels" onclick="toggleLabelsVisibility()" title="إظهار/إخفاء علامات الأجهزة" class="interactive-btn glass-dock px-2.5 py-1.5 rounded-xl text-xs font-bold text-cyan-400 hover:text-white border border-cyan-500/40 flex items-center gap-1.5 transition-all active:scale-95">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"></path></svg>
+                    <span class="hidden sm:inline">العلامات</span>
+                </button>
+
+                <!-- زر نمط الإضاءة (معرض / نهاري / ليلي) -->
+                <button id="btn-light-cycle" onclick="cycleLightingMode()" title="تغيير نمط الإضاءة" class="interactive-btn glass-dock px-2.5 py-1.5 rounded-xl text-xs font-bold text-amber-300 hover:text-white border border-amber-500/30 flex items-center gap-1.5 transition-all active:scale-95">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"></path></svg>
+                    <span id="light-mode-text" class="hidden sm:inline">إضاءة المعرض</span>
+                </button>
+
+                <!-- زر الصوت -->
+                <button id="btn-sound" onclick="toggleAudio()" title="كتم / تفعيل الصوت" class="interactive-btn glass-dock p-2 rounded-xl text-slate-300 hover:text-cyan-400 transition-all active:scale-95">
+                    <svg id="sound-icon-on" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"></path></svg>
+                    <svg id="sound-icon-off" class="w-4 h-4 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15zM17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2"></path></svg>
+                </button>
+
+                <!-- زر دليل الأجهزة والمنشآت -->
+                <button onclick="openCatalogDrawer()" class="interactive-btn glass-dock px-3 py-1.5 rounded-xl text-xs font-bold bg-cyan-600/30 hover:bg-cyan-600/50 text-cyan-300 border border-cyan-500/50 flex items-center gap-1.5 transition-all shadow-lg active:scale-95">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h7"></path></svg>
+                    <span>دليل الأجهزة</span>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- ========================================================================
+         2. شريط الإجراءات والتحكم بالكاميرا السريع (Floating Action Dock أسفل الشاشة)
+         ======================================================================== -->
+    <nav class="fixed bottom-3 sm:bottom-4 left-0 right-0 z-20 flex justify-center px-2 overlay-layer">
+        <div class="glass-dock interactive-btn rounded-2xl p-1.5 sm:p-2 border border-slate-700/80 shadow-2xl flex items-center gap-1 sm:gap-2 text-xs font-semibold overflow-x-auto max-w-full">
+            
+            <!-- زر مسقط علوي (مخطط المدارج) - الميزة الأساسية للشرح بدون أي حجب -->
+            <button onclick="viewTopDown()" class="px-3 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-extrabold flex items-center gap-1.5 shadow-md active:scale-95 transition-all shrink-0">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"></path></svg>
+                <span>مسقط علوي (مخطط المدارج)</span>
+            </button>
+
+            <!-- زر كامل المجسم (يظهر الطاولة والبرج بالكامل في المركز) -->
+            <button onclick="viewFullModel()" class="px-3 py-2 rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-extrabold flex items-center gap-1.5 shadow-md active:scale-95 transition-all shrink-0">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"></path></svg>
+                <span>كامل المجسم</span>
+            </button>
+
+            <!-- منظور مائل 45° -->
+            <button onclick="viewPerspective()" class="px-2.5 py-2 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-200 hover:text-cyan-300 border border-slate-700/60 flex items-center gap-1 active:scale-95 transition-all shrink-0">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 10l-2 1m0 0l-2-1m2 1v2.5M20 7l-2 1m2-1l-2-1m2 1v2.5M14 4l-2-1-2 1M4 7l2-1M4 7l2 1M4 7v2.5M12 21l-2-1m2 1l2-1m-2 1v-2.5M6 18l-2-1v-2.5M18 18l2-1v-2.5"></path></svg>
+                <span class="hidden sm:inline">منظور 3D</span>
+            </button>
+
+            <span class="w-[1px] h-5 bg-slate-700/80 mx-0.5 shrink-0"></span>
+
+            <!-- أزرار تقريب وتصغير للمس والفأرة -->
+            <button onclick="zoomStep(-1)" title="تقريب" class="p-2 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-200 hover:text-cyan-300 border border-slate-700/60 active:scale-95 transition-all shrink-0">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path></svg>
+            </button>
+            <button onclick="zoomStep(1)" title="تبعيد" class="p-2 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-200 hover:text-cyan-300 border border-slate-700/60 active:scale-95 transition-all shrink-0">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 12H6"></path></svg>
+            </button>
+        </div>
+    </nav>
+
+    <!-- ========================================================================
+         3. بطاقة المعلومات السفلية العائمة النظيفة (Floating Bottom Sheet)
+         تظهر عند النقر على أي جهاز بدون حجب المدرج أو الشاشة مع زر إغلاق صريح
+         ======================================================================== -->
+    <div id="info-bottom-sheet" class="fixed bottom-16 sm:bottom-20 left-0 right-0 z-30 flex justify-center px-3 overlay-layer pointer-events-none transition-all duration-300 transform translate-y-[120%] opacity-0">
+        <div class="interactive-card glass-dock rounded-2xl sm:rounded-3xl p-4 w-full max-w-xl border border-cyan-500/40 shadow-2xl relative">
+            
+            <!-- زر إغلاق صريح وواضح -->
+            <button onclick="closeInfoSheet()" class="absolute top-3 left-3 p-1.5 rounded-full bg-slate-800/90 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors active:scale-90">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+            </button>
+
+            <!-- محتوى البطاقة -->
+            <div class="pr-1 pl-7">
+                <div class="flex items-center gap-2 mb-1">
+                    <span id="sheet-cat" class="text-[10px] font-bold px-2 py-0.5 rounded-md bg-cyan-500/20 text-cyan-300 border border-cyan-500/30"></span>
+                    <span id="sheet-code" class="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-slate-800 text-slate-300"></span>
+                </div>
+                <h2 id="sheet-title-ar" class="text-sm sm:text-base font-extrabold text-white leading-tight"></h2>
+                <div id="sheet-title-en" class="text-[11px] font-mono text-cyan-400 font-semibold mb-2"></div>
+                
+                <p id="sheet-desc" class="text-xs text-slate-300 leading-relaxed line-clamp-3 mb-3"></p>
+
+                <!-- المواصفات السريعة -->
+                <div id="sheet-specs" class="grid grid-cols-2 sm:grid-cols-3 gap-1.5 text-[11px] mb-3"></div>
+
+                <!-- زر تقريب الكاميرا للجهاز -->
+                <button onclick="reZoomCurrentItem()" class="w-full py-1.5 px-3 rounded-xl bg-slate-800/90 hover:bg-cyan-900/40 text-cyan-300 border border-cyan-500/40 font-bold text-xs flex items-center justify-center gap-1.5 transition-all">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v6m3-3H7"></path></svg>
+                    <span>تقريب منظور الكاميرا لهذا الجهاز</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========================================================================
+         4. دليل الأجهزة المنزلق (Off-Canvas Catalog Modal)
+         مخفي افتراضياً ويفتح عند الطلب فقط
+         ======================================================================== -->
+    <div id="catalog-modal-backdrop" onclick="closeCatalogDrawer()" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 opacity-0 pointer-events-none transition-opacity duration-300"></div>
+    <div id="catalog-drawer" class="fixed top-0 bottom-0 right-0 w-80 sm:w-96 glass-dock z-50 p-4 flex flex-col transform translate-x-full transition-transform duration-300 border-l border-slate-700/80 shadow-2xl">
+        
+        <div class="flex items-center justify-between pb-3 border-b border-slate-700/70">
+            <div class="flex items-center gap-2">
+                <span class="w-2.5 h-2.5 rounded-full bg-cyan-400"></span>
+                <h3 class="font-bold text-sm text-white">دليل أجهزة ومنشآت المجسم</h3>
+            </div>
+            <button onclick="closeCatalogDrawer()" class="p-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+            </button>
+        </div>
+
+        <div class="mt-3 relative">
+            <input type="text" id="catalog-search" oninput="filterCatalogList()" placeholder="ابحث عن جهاز أو هوائي..." class="w-full bg-slate-900/90 border border-slate-700 rounded-xl px-8 py-2 text-xs text-white placeholder-slate-400 focus:outline-none focus:border-cyan-500">
+            <svg class="w-4 h-4 text-slate-400 absolute right-2.5 top-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+        </div>
+
+        <div id="catalog-items-container" class="flex-1 overflow-y-auto space-y-2 mt-3 pr-1"></div>
+
+        <div class="pt-3 border-t border-slate-700/70 text-[11px] text-slate-400 text-center">
+            تطابق هندسي 100% مع صور المجسم الفيزيائي الأصلي والمدارج واضحة بالكامل
+        </div>
+    </div>
+
+    <!-- ========================================================================
+         5. محرك THREE.JS وتوزيع المواقع المطابق للصورة العلوية 1000668469.jpg
+         ======================================================================== -->
+    <script>
+        /* --- قاعدة بيانات العناصر ومواقعها الصحيحة تماماً خارج المدارج --- */
+        const CAA_DATA = [
+            {
+                id: 'TOWER_MAIN',
+                nameAr: 'برج المراقبة الجوية الرئيسي',
+                nameEn: 'Muscat Main ATC Tower',
+                cat: 'أبراج المراقبة',
+                code: 'ATC-TWR',
+                worldPos: { x: 17.2, y: 7.5, z: 0 },
+                camPos: { x: 21.0, y: 13.5, z: 2.5 },
+                lookAt: { x: 17.2, y: 6.5, z: 0 },
+                desc: 'برج مراقبة مطار مسقط الدولي الشاهق المثبت على المنصة الخارجية المنفصلة شرق المجسم، ويدير عمليات الاقتراب والهبوط والمغادرة بكابينة زجاجية 360 درجة.',
+                specs: [
+                    { label: 'الارتفاع الميداني', val: '100 متر' },
+                    { label: 'تردد البرج', val: '118.1 MHz' },
+                    { label: 'الموقع بالمجسم', val: 'المنصة الشرقية المستقلة' }
+                ]
+            },
+            {
+                id: 'RADAR',
+                nameAr: 'رادار المراقبة الجوية الأولي والثانوي',
+                nameEn: 'Surveillance Radar (PSR / MSSR)',
+                cat: 'الرادار والاستطلاع',
+                code: 'PSR-MSSR',
+                // موقعه بالصورة: الحافة العلوية (شمال المدرج العلوي) قرب المنطقة الساحلية
+                worldPos: { x: 1.5, y: 2.5, z: -6.2 },
+                camPos: { x: 1.5, y: 6.5, z: -10.0 },
+                lookAt: { x: 1.5, y: 2.0, z: -6.2 },
+                desc: 'محطة الرادار على الحافة الشمالية خارج المدرج العلوي؛ تتكون من قاعدة دائرية سوداء، مبنى أبيض هرمي، نصف قبة رادوم، وهوائي أحمر منحني دوار.',
+                specs: [
+                    { label: 'مدى PSR الأولي', val: '80 ميل بحري' },
+                    { label: 'مدى MSSR الثانوي', val: '250 ميل بحري' },
+                    { label: 'الموقع بالمجسم', val: 'الحافة الشمالية (خارج المدرج)' }
+                ]
+            },
+            {
+                id: 'COMM_NORTH',
+                nameAr: 'سارية الاتصالات الشبكية (الشمالية الغربية)',
+                nameEn: 'North-West Aeronautical VHF Mast',
+                cat: 'الاتصالات الجوية',
+                code: 'VHF-NW',
+                // موقعه بالصورة: الركن العلوي الأيسر (أعلى عتبة 08 للمدرج الشمالي)
+                worldPos: { x: -9.8, y: 3.0, z: -6.4 },
+                camPos: { x: -12.5, y: 6.5, z: -9.0 },
+                lookAt: { x: -9.8, y: 2.5, z: -6.4 },
+                desc: 'سارية اتصالات شبكية جملونية مطلية بالأحمر والأبيض الدولي للطيران، مثبتة بالركن الشمالي الغربي خارج المدرج لتأمين الاتصال اللاسلكي النقي مع الطيارين.',
+                specs: [
+                    { label: 'حزمة التردد', val: 'VHF 118-137 MHz' },
+                    { label: 'الاستقطاب', val: 'رأسي متعدد' },
+                    { label: 'الموقع بالمجسم', val: 'الركن الشمالي الغربي' }
+                ]
+            },
+            {
+                id: 'COMM_WEST',
+                nameAr: 'سارية الاتصالات اللاسلكية (الغربية)',
+                nameEn: 'West Boundary VHF Mast',
+                cat: 'الاتصالات الجوية',
+                code: 'VHF-W',
+                // موقعه بالصورة: الحافة الغربية تماماً بين امتدادي المدرجين
+                worldPos: { x: -12.2, y: 3.0, z: -0.5 },
+                camPos: { x: -15.5, y: 6.0, z: -0.5 },
+                lookAt: { x: -12.2, y: 2.5, z: -0.5 },
+                desc: 'سارية اتصالات شبكية مثبتة على الحافة الغربية للمجسم في الفراغ بين خطي امتداد المدرجين دون اعتراض أي مسار للطائرات.',
+                specs: [
+                    { label: 'التوافقية', val: 'ICAO Annex 10' },
+                    { label: 'الموقع بالمجسم', val: 'الحافة الغربية الفاصلة' },
+                    { label: 'الاعتمادية', val: '99.999%' }
+                ]
+            },
+            {
+                id: 'DVOR',
+                nameAr: 'محطة المساعدات الملاحية الدوبلرية',
+                nameEn: 'Doppler VOR & DME Station',
+                cat: 'المساعدات الملاحية',
+                code: 'DVOR-DME',
+                // موقعه بالصورة: الركن السفلي الأيسر أسفل عتبة 08 للمدرج السفلي
+                worldPos: { x: -11.0, y: 2.2, z: 6.0 },
+                camPos: { x: -13.5, y: 6.0, z: 9.0 },
+                lookAt: { x: -11.0, y: 1.5, z: 6.0 },
+                desc: 'محطة ملاحية في الركن الجنوبي الغربي خارج المدرج تماماً؛ تشتمل على شبكة موازنة أرضية خضراء مرتفعة، وهوائي DME أسطواني مركزي، ومصفوفة هوائيات دائرية.',
+                specs: [
+                    { label: 'تردد VOR', val: '108 - 117.9 MHz' },
+                    { label: 'تردد DME', val: '960 - 1215 MHz' },
+                    { label: 'الموقع بالمجسم', val: 'الركن الجنوبي الغربي' }
+                ]
+            },
+            {
+                id: 'LOC',
+                nameAr: 'هوائي موجه مسار الهبوط الآلي الدقيق',
+                nameEn: 'ILS Localizer Array (LOC)',
+                cat: 'المساعدات الملاحية',
+                code: 'ILS-LOC',
+                // موقعه بالصورة: الركن السفلي الأيمن خلف عتبة 26 على قاعدة بيضاوية مضيئة
+                worldPos: { x: 12.5, y: 1.8, z: 5.2 },
+                camPos: { x: 15.0, y: 5.5, z: 7.8 },
+                lookAt: { x: 12.5, y: 1.2, z: 5.2 },
+                desc: 'مصفوفة هوائيات حمراء عريضة مثبتة على قاعدة بيضاوية سوداء ذات إطار مضيء خلف عتبة المدرج 26 لتوجيه الطائرات أفقياً بدقة CAT IIIb.',
+                specs: [
+                    { label: 'التصنيف العملياتي', val: 'ILS CAT IIIb' },
+                    { label: 'العناصر المشعة', val: '24 هوائي ثنائي القطب' },
+                    { label: 'الموقع بالمجسم', val: 'خلف عتبة 26 (جنوب شرق)' }
+                ]
+            },
+            {
+                id: 'TOWER_APRON',
+                nameAr: 'برج مراقبة الساحة والتدحرج',
+                nameEn: 'Apron & Ramp Control Tower',
+                cat: 'أبراج المراقبة',
+                code: 'APR-TWR',
+                // موقعه بالصورة: في الساحة الوسطى بين المبنى والمدرج الشمالي (واضح تماماً)
+                worldPos: { x: -1.2, y: 2.2, z: -1.6 },
+                camPos: { x: -1.2, y: 5.5, z: -4.5 },
+                lookAt: { x: -1.2, y: 1.8, z: -1.6 },
+                desc: 'برج رمادي مثمن ذو كابينة علوية يقع في الساحة المركزية خلف مبنى المسافرين وأمام ممر التدحرج الشمالي لإدارة حركة الساحة دون لمس المدرج.',
+                specs: [
+                    { label: 'نطاق الإشراف', val: 'الساحة وبوابات الصعود' },
+                    { label: 'التردد الراديوي', val: '121.75 MHz' },
+                    { label: 'الموقع بالمجسم', val: 'الساحة المركزية الشمالية' }
+                ]
+            },
+            {
+                id: 'COMM_APRON',
+                nameAr: 'محطة اتصالات الساحة وكابينة التوجيه',
+                nameEn: 'Apron Comms Station & Shelter',
+                cat: 'الاتصالات الجوية',
+                code: 'APR-COM',
+                // موقعه بالصورة: في الساحة بين المبنى والمدرج السفلي بقاعدة مضيئة
+                worldPos: { x: 2.5, y: 1.8, z: 2.0 },
+                camPos: { x: 2.5, y: 5.0, z: 4.8 },
+                lookAt: { x: 2.5, y: 1.3, z: 2.0 },
+                desc: 'محطة أجهزة اتصالات وإيواء على قاعدة دائرية مضيئة بين صالة الركاب وممر التدحرج الجنوبي يعلوها صاري إرسال أحمر وأبيض.',
+                specs: [
+                    { label: 'الدور', val: 'خوادم التوجيه والاتصال' },
+                    { label: 'القاعدة', val: 'قرص دائري مع إضاءة حلقة' },
+                    { label: 'الموقع بالمجسم', val: 'الساحة المركزية الجنوبية' }
+                ]
+            },
+            {
+                id: 'TERMINAL',
+                nameAr: 'مبنى المسافرين وأسطول الطائرات',
+                nameEn: 'Passenger Terminal Complex',
+                cat: 'مرافق المطار',
+                code: 'TERMINAL',
+                worldPos: { x: 1.0, y: 1.2, z: 0.1 },
+                camPos: { x: 1.0, y: 6.5, z: 4.5 },
+                lookAt: { x: 1.0, y: 0.8, z: 0.1 },
+                desc: 'المجسم المعماري لصالة المسافرين بأجنحتها المنحنية وبوابات الصعود، ومحاطة بنماذج الطائرات البيضاء المصغرة المصطفة في الساحة.',
+                specs: [
+                    { label: 'السعة', val: '20+ مليون مسافر سنوياً' },
+                    { label: 'البوابات', val: 'جسور صعود مجهزة' },
+                    { label: 'الموقع بالمجسم', val: 'قلب الساحة بين المدرجين' }
+                ]
+            },
+            {
+                id: 'RWY_NORTH',
+                nameAr: 'المدرج الشمالي (عتبة 08L وعتبة 26R)',
+                nameEn: 'Northern Runway 08L / 26R',
+                cat: 'المدارج والممرات',
+                code: 'RWY-08L/26R',
+                worldPos: { x: 0, y: 0.6, z: -4.2 },
+                camPos: { x: 0, y: 8.5, z: -4.2 },
+                lookAt: { x: 0, y: 0.3, z: -4.2 },
+                desc: 'المدرج الشمالي الممتد بكامل وضوحه من عتبة 08 غرباً إلى عتبة 26 شرقاً بدون أي أجهزة تعترضه؛ مع خطوط التلامس وعلامات المنتصف وممرات التدحرج الموازية.',
+                specs: [
+                    { label: 'الطول الميداني', val: '4,000 متر' },
+                    { label: 'حالة المسار', val: 'مفتوح وخالٍ تماماً 100%' },
+                    { label: 'التصنيف', val: 'Code 4F (A380 / B777X)' }
+                ]
+            },
+            {
+                id: 'RWY_SOUTH',
+                nameAr: 'المدرج الجنوبي (عتبة 08R وعتبة 26L)',
+                nameEn: 'Southern Runway 08R / 26L',
+                cat: 'المدارج والممرات',
+                code: 'RWY-08R/26L',
+                worldPos: { x: 0, y: 0.6, z: 4.5 },
+                camPos: { x: 0, y: 8.5, z: 4.5 },
+                lookAt: { x: 0, y: 0.3, z: 4.5 },
+                desc: 'المدرج الجنوبي الممتد بكامل وضوحه من عتبة 08 غرباً إلى عتبة 26 شرقاً بمحاذاة الواجهة الأمامية؛ خالي تماماً من أي عوائق للشرح التفاعلي.',
+                specs: [
+                    { label: 'الاتجاه المغناطيسي', val: '080° / 260°' },
+                    { label: 'حالة المسار', val: 'مفتوح وخالٍ تماماً 100%' },
+                    { label: 'نظام الهبوط', val: 'ILS CAT IIIb مجهز' }
+                ]
+            }
+        ];
+
+        /* --- متغيرات محرك Three.js والكاميرا --- */
+        let scene, camera, renderer, controls;
+        let radarSweeper = null;
+        let beaconLights = [];
+        let runwayLights = [];
+        let pedestalRings = [];
+        let interactiveMeshes = [];
+        let labelsVisible = true;
+        let activeItemId = null;
+
+        // إضاءات وأنماط
+        let ambientLight, sunLight, spotTable, spotTower;
+        const LIGHT_MODES = ['exhibition', 'day', 'night'];
+        let lightModeIndex = 0;
+
+        // أنيميشن حركة الكاميرا
+        let isCamTweening = false;
+        let tweenStartPos = new THREE.Vector3();
+        let tweenEndPos = new THREE.Vector3();
+        let tweenStartLook = new THREE.Vector3();
+        let tweenEndLook = new THREE.Vector3();
+        let tweenProgress = 0;
+        let tweenDuration = 1.0;
+
+        // صوت نغمة تفاعلية Web Audio
+        let audioCtx = null;
+        let soundMuted = false;
+
+        function playChirp() {
+            if (soundMuted) return;
+            try {
+                if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                if (audioCtx.state === 'suspended') audioCtx.resume();
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                osc.type = 'sine';
+                const now = audioCtx.currentTime;
+                osc.frequency.setValueAtTime(640, now);
+                osc.frequency.exponentialRampToValueAtTime(880, now + 0.08);
+                gain.gain.setValueAtTime(0.12, now);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+                osc.start(now);
+                osc.stop(now + 0.15);
+            } catch(e) {}
+        }
+
+        function toggleAudio() {
+            soundMuted = !soundMuted;
+            document.getElementById('sound-icon-on').classList.toggle('hidden', soundMuted);
+            document.getElementById('sound-icon-off').classList.toggle('hidden', !soundMuted);
+            if (!soundMuted) playChirp();
+        }
+
+        /* --- مولد خامة لوحة المطار الدقيقة (Airfield Texture المطابقة للمجسم) --- */
+        function createAirfieldTexture() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 4096;
+            canvas.height = 2340;
+            const ctx = canvas.getContext('2d');
+
+            // 1. أرضية المجسم: لون بيج رملي مطابق تماماً لصورة المجسم
+            ctx.fillStyle = '#C4B49C';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // 2. الشريط الساحلي والماء (أعلى اليمين في خريطة المطار)
+            ctx.save();
+            ctx.beginPath();
+            ctx.moveTo(canvas.width - 1200, 0);
+            ctx.lineTo(canvas.width, 0);
+            ctx.lineTo(canvas.width, 700);
+            ctx.bezierCurveTo(canvas.width - 400, 600, canvas.width - 800, 350, canvas.width - 1200, 0);
+            ctx.closePath();
+            ctx.fillStyle = '#263E4D'; // ماء البحر
+            ctx.fill();
+
+            // شريط الحزام الأخضر الساحلي
+            ctx.beginPath();
+            ctx.moveTo(canvas.width - 1380, 0);
+            ctx.lineTo(canvas.width - 1200, 0);
+            ctx.bezierCurveTo(canvas.width - 800, 350, canvas.width - 400, 600, canvas.width, 700);
+            ctx.lineTo(canvas.width, 820);
+            ctx.bezierCurveTo(canvas.width - 500, 720, canvas.width - 950, 450, canvas.width - 1380, 0);
+            ctx.closePath();
+            ctx.fillStyle = '#557250'; // المسطح الأخضر
+            ctx.fill();
+            ctx.restore();
+
+            // 3. مسار المدرجين المتوازيين (شمالي وجنوبي) - خاليان تماماً من أي رسومات أو عوائق
+            const rwyStartX = 420;
+            const rwyEndX = 3450;
+            const rwyLength = rwyEndX - rwyStartX;
+            const rwyWidth = 110;
+
+            const yNorth = 590;  // المدرج الشمالي
+            const ySouth = 1860; // المدرج الجنوبي
+
+            function drawRunway(yCenter, labelLeft, labelRight) {
+                const topY = yCenter - rwyWidth / 2;
+                
+                // إسفلت داكن واقعي
+                ctx.fillStyle = '#22262C';
+                ctx.fillRect(rwyStartX, topY, rwyLength, rwyWidth);
+
+                // خطوط الحواف البيضاء المستمرة
+                ctx.lineWidth = 4;
+                ctx.strokeStyle = '#FFFFFF';
+                ctx.beginPath();
+                ctx.moveTo(rwyStartX, topY + 4);
+                ctx.lineTo(rwyEndX, topY + 4);
+                ctx.moveTo(rwyStartX, topY + rwyWidth - 4);
+                ctx.lineTo(rwyEndX, topY + rwyWidth - 4);
+                ctx.stroke();
+
+                // عتبة 08 (أصابع البيانو البيضاء Threshold Stripes)
+                ctx.fillStyle = '#FFFFFF';
+                for (let i = 0; i < 10; i++) {
+                    ctx.fillRect(rwyStartX + 35, topY + 14 + i * 8.5, 65, 5);
+                }
+
+                // كتابة رقم العتبة '08' بوضوح كبير
+                ctx.save();
+                ctx.font = '900 48px monospace';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.translate(rwyStartX + 155, yCenter);
+                ctx.rotate(Math.PI / 2);
+                ctx.fillText(labelLeft, 0, 0);
+                ctx.restore();
+
+                // خط المنتصف المتقطع
+                ctx.lineWidth = 6;
+                ctx.strokeStyle = '#FFFFFF';
+                ctx.setLineDash([55, 45]);
+                ctx.beginPath();
+                ctx.moveTo(rwyStartX + 240, yCenter);
+                ctx.lineTo(rwyEndX - 240, yCenter);
+                ctx.stroke();
+                ctx.setLineDash([]);
+
+                // عتبة 26
+                for (let i = 0; i < 10; i++) {
+                    ctx.fillRect(rwyEndX - 100, topY + 14 + i * 8.5, 65, 5);
+                }
+
+                // كتابة رقم العتبة '26'
+                ctx.save();
+                ctx.font = '900 48px monospace';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.translate(rwyEndX - 155, yCenter);
+                ctx.rotate(-Math.PI / 2);
+                ctx.fillText(labelRight, 0, 0);
+                ctx.restore();
+            }
+
+            drawRunway(yNorth, '08', '26');
+            drawRunway(ySouth, '08', '26');
+
+            // 4. ممرات التدحرج الصفراء ومناطق الساحات (Ochre / Tan Taxiways)
+            ctx.fillStyle = '#DBB072';
+            // ممر تدحرج موازٍ للمدرج الشمالي
+            ctx.fillRect(rwyStartX + 120, yNorth + 75, rwyLength - 240, 50);
+            // ممر تدحرج موازٍ للمدرج الجنوبي
+            ctx.fillRect(rwyStartX + 120, ySouth - 125, rwyLength - 240, 50);
+
+            // وصلات الخروج السريعة والتاكسي للمدرج الشمالي
+            for (let x = rwyStartX + 450; x < rwyEndX - 400; x += 650) {
+                ctx.fillRect(x, yNorth + 55, 60, 25);
+            }
+            // وصلات الخروج للمدرج الجنوبي
+            for (let x = rwyStartX + 450; x < rwyEndX - 400; x += 650) {
+                ctx.fillRect(x, ySouth - 75, 60, 25);
+            }
+
+            // الساحة الوسطى (Apron Concrete)
+            ctx.fillStyle = '#D4C3A9';
+            ctx.fillRect(rwyStartX + 450, yNorth + 145, 2050, 770);
+
+            // أثر مبنى صالة المسافرين
+            ctx.fillStyle = '#ECE2D2';
+            ctx.fillRect(rwyStartX + 950, 1140, 1050, 150);
+
+            // خطوط الخدمة الأرضية الرمادية
+            ctx.strokeStyle = '#B3A188';
+            ctx.lineWidth = 3;
+            ctx.strokeRect(rwyStartX + 350, yNorth + 130, 2250, 800);
+
+            const tex = new THREE.CanvasTexture(canvas);
+            tex.anisotropy = 8;
+            return tex;
+        }
+
+        /* --- مولد خامة الواجهة الأمامية للطاولة (مجسم الملاحة الجوية وشعار CAA) --- */
+        function createTableFrontTexture() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 2048;
+            canvas.height = 256;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#F8FAFC';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // كتابة النص العربي المعتمد "مجسم الملاحة الجوية"
+            ctx.fillStyle = '#0F172A';
+            ctx.font = 'bold 90px "Cairo", sans-serif';
+            ctx.textAlign = 'right';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('مجسم الملاحة الجوية', canvas.width - 320, canvas.height / 2);
+
+            // رسم شعار هيئة الطيران المدني CAA
+            const lx = canvas.width - 160, ly = canvas.height / 2;
+            ctx.fillStyle = '#059669';
+            ctx.beginPath();
+            ctx.moveTo(lx - 50, ly + 35);
+            ctx.quadraticCurveTo(lx, ly - 45, lx + 50, ly - 45);
+            ctx.quadraticCurveTo(lx + 10, ly, lx - 50, ly + 35);
+            ctx.fill();
+
+            ctx.font = 'bold 44px "Tajawal", sans-serif';
+            ctx.fillStyle = '#0F172A';
+            ctx.fillText('CAA  هيئة الطيران المدني', canvas.width - 980, canvas.height / 2 + 6);
+
+            const tex = new THREE.CanvasTexture(canvas);
+            tex.anisotropy = 4;
+            return tex;
+        }
+
+        /* --- بناء المجسمات والأجهزة ثلاثية الأبعاد (Digital Twin) --- */
+        function buildAirfieldScene() {
+            const matWhite = new THREE.MeshStandardMaterial({ color: 0xFAFAFA, roughness: 0.35 });
+            const matRed = new THREE.MeshStandardMaterial({ color: 0xEF4444, roughness: 0.3 });
+            const matSlate = new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.45 });
+            const matCyanGlass = new THREE.MeshStandardMaterial({ color: 0x38BDF8, roughness: 0.1, metalness: 0.85, transparent: true, opacity: 0.85 });
+
+            // 1. طاولة العرض الملاحية الفيزيائية
+            const tableWidth = 28, tableDepth = 16;
+            const boardGeo = new THREE.BoxGeometry(tableWidth, 0.4, tableDepth);
+            const boardMesh = new THREE.Mesh(boardGeo, new THREE.MeshStandardMaterial({ map: createAirfieldTexture(), roughness: 0.8 }));
+            boardMesh.receiveShadow = true;
+            scene.add(boardMesh);
+
+            // الحواف البيضاء المشطوفة للطاولة
+            const borderMat = new THREE.MeshStandardMaterial({ color: 0xF8FAFC, roughness: 0.3 });
+            const frontBorderMat = new THREE.MeshStandardMaterial({ map: createTableFrontTexture(), roughness: 0.3 });
+
+            const frontGeo = new THREE.BoxGeometry(tableWidth + 1.2, 0.7, 0.8);
+            frontGeo.rotateX(-0.16);
+            const frontMesh = new THREE.Mesh(frontGeo, frontBorderMat);
+            frontMesh.position.set(0, 0.15, tableDepth / 2 + 0.4);
+
+            const backGeo = new THREE.BoxGeometry(tableWidth + 1.2, 0.7, 0.8);
+            backGeo.rotateX(0.16);
+            const backMesh = new THREE.Mesh(backGeo, borderMat);
+            backMesh.position.set(0, 0.15, -tableDepth / 2 - 0.4);
+
+            const sideGeo = new THREE.BoxGeometry(0.8, 0.7, tableDepth + 1.2);
+            const leftMesh = new THREE.Mesh(sideGeo, borderMat);
+            leftMesh.position.set(-tableWidth / 2 - 0.4, 0.15, 0);
+            const rightMesh = new THREE.Mesh(sideGeo, borderMat);
+            rightMesh.position.set(tableWidth / 2 + 0.4, 0.15, 0);
+
+            scene.add(frontMesh, backMesh, leftMesh, rightMesh);
+
+            // مفتاح الكهرباء الجانبي وسلك التوصيل (الأمامي الأيسر)
+            const switchBox = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.45, 0.15), matSlate);
+            switchBox.position.set(-tableWidth / 2 + 4, 0.15, tableDepth / 2 + 0.8);
+            scene.add(switchBox);
+
+            // المنصة الممتدة المستقلة لبرج مراقبة مسقط (الجهة الشرقية)
+            const extPlatform = new THREE.Mesh(new THREE.BoxGeometry(4.8, 0.5, 4.8), new THREE.MeshStandardMaterial({ color: 0x0F172A }));
+            extPlatform.position.set(tableWidth / 2 + 3.2, -0.1, 0);
+            scene.add(extPlatform);
+
+            // أرجل الطاولة الداكنة
+            const legGeo = new THREE.BoxGeometry(1.2, 3.5, 1.2);
+            const legMat = new THREE.MeshStandardMaterial({ color: 0x0B131D });
+            [
+                [-tableWidth / 2 + 2, -1.95, -tableDepth / 2 + 2],
+                [tableWidth / 2 - 2, -1.95, -tableDepth / 2 + 2],
+                [-tableWidth / 2 + 2, -1.95, tableDepth / 2 - 2],
+                [tableWidth / 2 - 2, -1.95, tableDepth / 2 - 2],
+                [tableWidth / 2 + 3.8, -1.95, 0]
+            ].forEach(p => {
+                const leg = new THREE.Mesh(legGeo, legMat);
+                leg.position.set(p[0], p[1], p[2]);
+                scene.add(leg);
+            });
+
+            // مساعد: إنشاء صحن القاعدة السوداء الدائرية والبيضاوية مع حلقة إضاءة
+            function createBlackPodium(rad, h, isElliptical = false, hasGlowRing = false) {
+                const group = new THREE.Group();
+                const coneGeo = new THREE.CylinderGeometry(rad, rad * 0.75, h, 32);
+                if (isElliptical) coneGeo.scale(2.4, 1, 0.9);
+                const cone = new THREE.Mesh(coneGeo, new THREE.MeshStandardMaterial({ color: 0x14181C, roughness: 0.5 }));
+                cone.position.y = h / 2;
+
+                const rimGeo = new THREE.CylinderGeometry(rad * 1.05, rad * 1.05, 0.08, 32);
+                if (isElliptical) rimGeo.scale(2.4, 1, 0.9);
+                const rim = new THREE.Mesh(rimGeo, new THREE.MeshStandardMaterial({ color: 0x242A30, roughness: 0.4 }));
+                rim.position.y = h + 0.04;
+                group.add(cone, rim);
+
+                if (hasGlowRing) {
+                    const glowGeo = new THREE.TorusGeometry(rad * 1.02, 0.04, 8, 32);
+                    if (isElliptical) glowGeo.scale(2.4, 0.9, 1);
+                    glowGeo.rotateX(Math.PI / 2);
+                    const glowMat = new THREE.MeshBasicMaterial({ color: 0xFFE082 });
+                    const glowRing = new THREE.Mesh(glowGeo, glowMat);
+                    glowRing.position.y = h + 0.06;
+                    group.add(glowRing);
+                    pedestalRings.push(glowRing);
+                }
+                return group;
+            }
+
+            // 2. [TOWER_MAIN] برج مطار مسقط الدولي الشاهق (على المنصة الخارجية المستقلة)
+            const tower = new THREE.Group();
+            tower.position.set(tableWidth / 2 + 3.2, 0.15, 0);
+
+            const plinth = new THREE.Mesh(new THREE.BoxGeometry(3.4, 0.8, 3.4), matWhite);
+            plinth.position.y = 0.4;
+            const plinthStep = new THREE.Mesh(new THREE.BoxGeometry(2.8, 0.6, 2.8), matWhite);
+            plinthStep.position.y = 1.0;
+            tower.add(plinth, plinthStep);
+
+            const pylonH = 10.0;
+            const pL = new THREE.Mesh(new THREE.BoxGeometry(0.75, pylonH, 1.7), matSlate);
+            pL.position.set(-0.85, 1.3 + pylonH / 2, 0);
+            const pR = new THREE.Mesh(new THREE.BoxGeometry(0.75, pylonH, 1.7), matSlate);
+            pR.position.set(0.85, 1.3 + pylonH / 2, 0);
+            const glassCore = new THREE.Mesh(new THREE.BoxGeometry(0.85, pylonH, 1.2), matCyanGlass);
+            glassCore.position.set(0, 1.3 + pylonH / 2, 0);
+            tower.add(pL, pR, glassCore);
+
+            const cabBase = new THREE.Mesh(new THREE.CylinderGeometry(1.6, 1.0, 0.9, 16), matWhite);
+            cabBase.position.y = 1.3 + pylonH + 0.45;
+            const cabGlass = new THREE.Mesh(new THREE.CylinderGeometry(1.7, 1.45, 1.0, 16), matCyanGlass);
+            cabGlass.position.y = 1.3 + pylonH + 1.35;
+            const dome = new THREE.Mesh(new THREE.SphereGeometry(0.75, 16, 12, 0, Math.PI * 2, 0, Math.PI / 2), matWhite);
+            dome.position.y = 1.3 + pylonH + 2.0;
+            tower.add(cabBase, cabGlass, dome);
+
+            const beacon = new THREE.Mesh(new THREE.SphereGeometry(0.12, 8, 8), new THREE.MeshStandardMaterial({ color: 0xFF0000, emissive: 0xFF0000, emissiveIntensity: 2.5 }));
+            beacon.position.y = 1.3 + pylonH + 3.0;
+            tower.add(beacon);
+            beaconLights.push(beacon);
+
+            registerMesh(tower, 'TOWER_MAIN');
+            scene.add(tower);
+
+            // 3. [RADAR] محطة رادار الاستطلاع PSR/MSSR (الحافة الشمالية خارج المدرج العلوي تماماً)
+            const radar = new THREE.Group();
+            radar.position.set(1.5, 0.2, -6.2);
+            radar.add(createBlackPodium(2.1, 0.4));
+            
+            const rBase = new THREE.Mesh(new THREE.BoxGeometry(2.3, 0.9, 2.3), matWhite);
+            rBase.position.y = 0.8;
+            radar.add(rBase);
+
+            // قبة الرادوم المقوسة
+            const radome = new THREE.Mesh(
+                new THREE.SphereGeometry(1.2, 24, 16, 0, Math.PI * 1.55, 0, Math.PI * 0.85),
+                new THREE.MeshStandardMaterial({ color: 0xFFFFFF, roughness: 0.2, side: THREE.DoubleSide })
+            );
+            radome.rotation.x = Math.PI;
+            radome.rotation.y = -Math.PI / 4;
+            radome.position.y = 2.45;
+            radar.add(radome);
+
+            // الهوائي الأحمر الدوار
+            const rSpin = new THREE.Group();
+            rSpin.position.y = 2.05;
+            const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.15, 0.6, 12), matSlate);
+            shaft.position.y = 0.3;
+            rSpin.add(shaft);
+
+            const refCurve = new THREE.CylinderGeometry(0.7, 0.7, 0.5, 16, 1, true, 0, Math.PI * 0.9);
+            refCurve.rotateY(Math.PI / 2);
+            const reflector = new THREE.Mesh(refCurve, matRed);
+            reflector.position.set(0, 0.7, 0.1);
+            const mssr = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.1, 0.12), matRed);
+            mssr.position.set(0, 1.05, 0.1);
+            rSpin.add(reflector, mssr);
+            radar.add(rSpin);
+            radarSweeper = rSpin;
+
+            registerMesh(radar, 'RADAR');
+            scene.add(radar);
+
+            // 4. [COMM_NORTH] سارية الاتصالات الشمالية الغربية (الركن العلوي الأيسر)
+            const commN = new THREE.Group();
+            commN.position.set(-9.8, 0.2, -6.4);
+            commN.add(createBlackPodium(1.0, 0.35));
+            for (let s = 0; s < 5; s++) {
+                const smat = s % 2 === 0 ? matRed : matWhite;
+                const sec = new THREE.Mesh(new THREE.BoxGeometry(0.38 - s * 0.05, 0.8, 0.38 - s * 0.05), smat);
+                sec.position.y = 0.6 + s * 0.8 + 0.4;
+                commN.add(sec);
+            }
+            const bcnN = new THREE.Mesh(new THREE.SphereGeometry(0.08, 8, 8), new THREE.MeshStandardMaterial({ color: 0xFF0000, emissive: 0xFF0000, emissiveIntensity: 2.0 }));
+            bcnN.position.y = 4.8;
+            commN.add(bcnN);
+            beaconLights.push(bcnN);
+            registerMesh(commN, 'COMM_NORTH');
+            scene.add(commN);
+
+            // 5. [COMM_WEST] سارية الاتصالات الغربية (الحافة الغربية الفاصلة بين المدرجين)
+            const commW = new THREE.Group();
+            commW.position.set(-12.2, 0.2, -0.5);
+            commW.add(createBlackPodium(1.0, 0.35));
+            for (let s = 0; s < 5; s++) {
+                const smat = s % 2 === 0 ? matRed : matWhite;
+                const sec = new THREE.Mesh(new THREE.BoxGeometry(0.38 - s * 0.05, 0.8, 0.38 - s * 0.05), smat);
+                sec.position.y = 0.6 + s * 0.8 + 0.4;
+                commW.add(sec);
+            }
+            const bcnW = new THREE.Mesh(new THREE.SphereGeometry(0.08, 8, 8), new THREE.MeshStandardMaterial({ color: 0xFF0000, emissive: 0xFF0000, emissiveIntensity: 2.0 }));
+            bcnW.position.y = 4.8;
+            commW.add(bcnW);
+            beaconLights.push(bcnW);
+            registerMesh(commW, 'COMM_WEST');
+            scene.add(commW);
+
+            // 6. [DVOR] محطة DVOR/DME (الركن الجنوبي الغربي أسفل عتبة 08)
+            const dvor = new THREE.Group();
+            dvor.position.set(-11.0, 0.2, 6.0);
+            dvor.add(createBlackPodium(1.9, 0.4));
+            
+            // شبكة الموازنة الأرضية المرتفعة
+            const screen = new THREE.Mesh(new THREE.CylinderGeometry(1.5, 1.5, 0.06, 32), new THREE.MeshStandardMaterial({ color: 0x1E3A2F }));
+            screen.position.y = 1.1;
+            dvor.add(screen);
+
+            // هوائي DME المركزي
+            const dme = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.18, 0.75, 16), matWhite);
+            dme.position.y = 1.55;
+            dvor.add(dme);
+
+            // مصفوفة هوائيات ألفورد الدائرية
+            for (let a = 0; a < 16; a++) {
+                const ang = (a / 16) * Math.PI * 2;
+                const alf = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.2, 8), matWhite);
+                alf.position.set(Math.cos(ang) * 1.2, 1.22, Math.sin(ang) * 1.2);
+                dvor.add(alf);
+            }
+            registerMesh(dvor, 'DVOR');
+            scene.add(dvor);
+
+            // 7. [LOC] هوائي مسار الهبوط الآلي ILS Localizer (الركن الجنوبي الشرقي على قاعدة بيضاوية مضيئة)
+            const loc = new THREE.Group();
+            loc.position.set(12.5, 0.2, 5.2);
+            loc.add(createBlackPodium(1.4, 0.35, true, true));
+            
+            const bar = new THREE.Mesh(new THREE.BoxGeometry(4.4, 0.1, 0.1), matWhite);
+            bar.position.set(0, 0.8, 0);
+            loc.add(bar);
+
+            for (let i = 0; i < 24; i++) {
+                const dip = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.65, 6), matRed);
+                dip.position.set(-2.2 + (i / 23) * 4.4, 0.8, 0);
+                loc.add(dip);
+            }
+            registerMesh(loc, 'LOC');
+            scene.add(loc);
+
+            // كابينة أجهزة الـ Localizer المجاورة له
+            const locShelter = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.7, 0.8), matWhite);
+            locShelter.position.set(10.5, 0.55, 2.5);
+            scene.add(locShelter);
+
+            // 8. [TOWER_APRON] برج مراقبة الساحة (الساحة المركزية بين المبنى والمدرج الشمالي)
+            const atw = new THREE.Group();
+            atw.position.set(-1.2, 0.2, -1.6);
+            atw.add(createBlackPodium(1.1, 0.35));
+            const atwBody = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.5, 3.2, 8), matSlate);
+            atwBody.position.y = 1.8;
+            const atwCab = new THREE.Mesh(new THREE.CylinderGeometry(0.65, 0.45, 0.6, 8), matCyanGlass);
+            atwCab.position.y = 3.6;
+            atw.add(atwBody, atwCab);
+            registerMesh(atw, 'TOWER_APRON');
+            scene.add(atw);
+
+            // 9. [COMM_APRON] محطة اتصالات الساحة (الساحة المركزية بين المبنى والمدرج الجنوبي)
+            const commAp = new THREE.Group();
+            commAp.position.set(2.5, 0.2, 2.0);
+            commAp.add(createBlackPodium(1.2, 0.35, false, true));
+            const shBox = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.55, 0.6), matWhite);
+            shBox.position.set(-0.2, 0.6, 0);
+            const mast3 = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.04, 2.5, 8), matRed);
+            mast3.position.set(0.3, 1.5, 0);
+            commAp.add(shBox, mast3);
+            registerMesh(commAp, 'COMM_APRON');
+            scene.add(commAp);
+
+            // 10. [TERMINAL] مبنى المسافرين وأسطول الطائرات في قلب الساحة
+            const term = new THREE.Group();
+            term.position.set(1.0, 0.2, 0.1);
+            
+            // كتلة صالة الركاب المركزية وأجنحتها
+            const hall = new THREE.Mesh(new THREE.BoxGeometry(4.4, 0.65, 1.6), matWhite);
+            hall.position.y = 0.35;
+            const pierL = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.45, 2.8), matWhite);
+            pierL.position.set(-2.0, 0.25, 0);
+            const pierR = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.45, 2.8), matWhite);
+            pierR.position.set(2.0, 0.25, 0);
+            term.add(hall, pierL, pierR);
+
+            // نماذج الطائرات البيضاء المصغرة المصطفة
+            function createPlane() {
+                const p = new THREE.Group();
+                const fuse = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.05, 0.7, 8), matWhite);
+                fuse.rotateZ(Math.PI / 2);
+                const wings = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.02, 0.75), matWhite);
+                p.add(fuse, wings);
+                return p;
+            }
+            [-1.8, -0.6, 0.6, 1.8].forEach(px => {
+                const pl = createPlane();
+                pl.position.set(px, 0.15, -1.8);
+                pl.rotation.y = Math.PI / 2;
+                term.add(pl);
+            });
+            [-1.8, -0.6, 0.6, 1.8].forEach(px => {
+                const pl = createPlane();
+                pl.position.set(px, 0.15, 1.8);
+                pl.rotation.y = -Math.PI / 2;
+                term.add(pl);
+            });
+            registerMesh(term, 'TERMINAL');
+            scene.add(term);
+
+            // 11. المدارج المفتوحة كأهداف قابلة للنقر (Hitboxes شفافة)
+            const rwyNorthBox = new THREE.Mesh(new THREE.BoxGeometry(22, 0.4, 2.2), new THREE.MeshBasicMaterial({ visible: false }));
+            rwyNorthBox.position.set(0, 0.3, -4.2);
+            registerMesh(rwyNorthBox, 'RWY_NORTH');
+            scene.add(rwyNorthBox);
+
+            const rwySouthBox = new THREE.Mesh(new THREE.BoxGeometry(22, 0.4, 2.2), new THREE.MeshBasicMaterial({ visible: false }));
+            rwySouthBox.position.set(0, 0.3, 4.5);
+            registerMesh(rwySouthBox, 'RWY_SOUTH');
+            scene.add(rwySouthBox);
+
+            // 12. أضواء المدارج الليلية (Runway Edge & Threshold Lights)
+            const lGeo = new THREE.SphereGeometry(0.045, 6, 6);
+            const lMatW = new THREE.MeshBasicMaterial({ color: 0xFFFFFF });
+            const lMatG = new THREE.MeshBasicMaterial({ color: 0x00FF88 });
+            const lMatR = new THREE.MeshBasicMaterial({ color: 0xFF2222 });
+
+            [-4.2, 4.5].forEach(rwyZ => {
+                [-0.8, 0.8].forEach(dz => {
+                    for (let lx = -10.5; lx <= 10.5; lx += 1.5) {
+                        const l = new THREE.Mesh(lGeo, lMatW);
+                        l.position.set(lx, 0.24, rwyZ + dz);
+                        l.visible = false;
+                        scene.add(l);
+                        runwayLights.push(l);
+                    }
+                });
+
+                // أضواء العتبة الخضراء والحمراء
+                for (let tz = -0.7; tz <= 0.7; tz += 0.25) {
+                    const lg = new THREE.Mesh(lGeo, lMatG);
+                    lg.position.set(-10.5, 0.24, rwyZ + tz);
+                    lg.visible = false;
+                    scene.add(lg);
+                    runwayLights.push(lg);
+
+                    const lr = new THREE.Mesh(lGeo, lMatR);
+                    lr.position.set(10.5, 0.24, rwyZ + tz);
+                    lr.visible = false;
+                    scene.add(lr);
+                    runwayLights.push(lr);
+                }
+            });
+        }
+
+        function registerMesh(group, id) {
+            group.userData = { id: id };
+            interactiveMeshes.push(group);
+            group.traverse(child => {
+                if (child.isMesh) {
+                    child.userData = { id: id, parentGroup: group };
+                    interactiveMeshes.push(child);
+                }
+            });
+        }
+
+        /* --- إنشاء علامات الأجهزة ثلاثية الأبعاد (3D Badges) --- */
+        function create3DPins() {
+            const container = document.getElementById('labels-container');
+            container.innerHTML = '';
+
+            CAA_DATA.forEach(item => {
+                const pin = document.createElement('div');
+                pin.id = `pin-${item.id}`;
+                pin.className = 'device-pin';
+                pin.onclick = (e) => {
+                    e.stopPropagation();
+                    focusOnItem(item.id);
+                };
+
+                pin.innerHTML = `
+                    <div class="glass-dock px-2 py-1 rounded-lg border border-cyan-500/50 shadow-lg flex items-center gap-1.5 hover:bg-cyan-900/40">
+                        <span class="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse"></span>
+                        <span class="text-[10px] sm:text-xs font-bold text-white">${item.nameAr}</span>
+                    </div>
+                `;
+                container.appendChild(pin);
+            });
+        }
+
+        // تحديث مواقع العلامات مع الكاميرا
+        const tempV3 = new THREE.Vector3();
+        function update3DPinsPosition() {
+            if (!labelsVisible) return;
+            const w = window.innerWidth, h = window.innerHeight;
+
+            CAA_DATA.forEach(item => {
+                const el = document.getElementById(`pin-${item.id}`);
+                if (!el) return;
+
+                tempV3.set(item.worldPos.x, item.worldPos.y, item.worldPos.z);
+                tempV3.project(camera);
+
+                if (tempV3.z > 1) {
+                    el.style.display = 'none';
+                    return;
+                }
+
+                el.style.display = 'block';
+                const screenX = (tempV3.x * 0.5 + 0.5) * w;
+                const screenY = (-tempV3.y * 0.5 + 0.5) * h;
+                el.style.left = `${screenX}px`;
+                el.style.top = `${screenY}px`;
+            });
+        }
+
+        function toggleLabelsVisibility() {
+            labelsVisible = !labelsVisible;
+            const container = document.getElementById('labels-container');
+            container.style.display = labelsVisible ? 'block' : 'none';
+            const btn = document.getElementById('btn-toggle-labels');
+            btn.classList.toggle('text-cyan-400', labelsVisible);
+            btn.classList.toggle('text-slate-400', !labelsVisible);
+            playChirp();
+        }
+
+        /* --- تحريك الكاميرا السلس (Camera Tweens) --- */
+        function moveCameraSmooth(targetCam, targetLook, duration = 1.0) {
+            tweenStartPos.copy(camera.position);
+            tweenEndPos.copy(targetCam);
+            tweenStartLook.copy(controls.target);
+            tweenEndLook.copy(targetLook);
+            tweenProgress = 0;
+            tweenDuration = duration;
+            isCamTweening = true;
+            controls.enabled = false;
+        }
+
+        // 1. مسقط رأسي علوي كامل (مخطط المدارج) - الميزة المطلوبة للشرح بدون أي حجب
+        function viewTopDown() {
+            playChirp();
+            closeInfoSheet();
+            moveCameraSmooth(
+                new THREE.Vector3(1.5, 36, 0.01),
+                new THREE.Vector3(1.5, 0, 0),
+                1.0
+            );
+        }
+
+        // 2. كامل المجسم (يظهر الطاولة وبرج مسقط بالكامل في المنتصف)
+        function viewFullModel() {
+            playChirp();
+            closeInfoSheet();
+            moveCameraSmooth(
+                new THREE.Vector3(1.5, 27, 32),
+                new THREE.Vector3(1.5, 1.5, 0),
+                1.1
+            );
+        }
+
+        // 3. منظور مائل 45°
+        function viewPerspective() {
+            playChirp();
+            moveCameraSmooth(
+                new THREE.Vector3(0, 17, 24),
+                new THREE.Vector3(0, 1.5, 0),
+                0.9
+            );
+        }
+
+        // أزرار التقريب والتبعيد السريعة
+        function zoomStep(dir) {
+            playChirp();
+            const vec = new THREE.Vector3().subVectors(camera.position, controls.target);
+            const len = vec.length();
+            const targetLen = Math.max(4, Math.min(70, len + dir * 5.5));
+            vec.setLength(targetLen);
+            moveCameraSmooth(
+                new THREE.Vector3().addVectors(controls.target, vec),
+                controls.target,
+                0.4
+            );
+        }
+
+        /* --- تفاعل اختيار العناصر وبطاقة المعلومات --- */
+        function focusOnItem(id) {
+            const item = CAA_DATA.find(i => i.id === id);
+            if (!item) return;
+
+            activeItemId = id;
+            playChirp();
+
+            // تحريك الكاميرا بسلاسة نحو الجهاز المحدد
+            moveCameraSmooth(
+                new THREE.Vector3(item.camPos.x, item.camPos.y, item.camPos.z),
+                new THREE.Vector3(item.lookAt.x, item.lookAt.y, item.lookAt.z),
+                0.9
+            );
+
+            // إظهار بطاقة المعلومات العائمة
+            showInfoSheet(item);
+        }
+
+        function reZoomCurrentItem() {
+            if (activeItemId) focusOnItem(activeItemId);
+        }
+
+        function showInfoSheet(item) {
+            document.getElementById('sheet-cat').innerText = item.cat;
+            document.getElementById('sheet-code').innerText = item.code;
+            document.getElementById('sheet-title-ar').innerText = item.nameAr;
+            document.getElementById('sheet-title-en').innerText = item.nameEn;
+            document.getElementById('sheet-desc').innerText = item.desc;
+
+            const specsEl = document.getElementById('sheet-specs');
+            specsEl.innerHTML = '';
+            item.specs.forEach(s => {
+                const d = document.createElement('div');
+                d.className = 'glass-dock p-1.5 rounded-lg border border-slate-700/60';
+                d.innerHTML = `
+                    <div class="text-[9px] text-slate-400">${s.label}</div>
+                    <div class="font-bold text-cyan-300 font-mono">${s.val}</div>
+                `;
+                specsEl.appendChild(d);
+            });
+
+            const sheet = document.getElementById('info-bottom-sheet');
+            sheet.classList.remove('translate-y-[120%]', 'opacity-0');
+            sheet.classList.add('translate-y-0', 'opacity-100');
+        }
+
+        function closeInfoSheet() {
+            const sheet = document.getElementById('info-bottom-sheet');
+            sheet.classList.add('translate-y-[120%]', 'opacity-0');
+            sheet.classList.remove('translate-y-0', 'opacity-100');
+            activeItemId = null;
+        }
+
+        /* --- دليل الأجهزة المنزلق (Catalog Off-Canvas) --- */
+        function openCatalogDrawer() {
+            playChirp();
+            document.getElementById('catalog-modal-backdrop').classList.remove('pointer-events-none', 'opacity-0');
+            document.getElementById('catalog-modal-backdrop').classList.add('opacity-100');
+            document.getElementById('catalog-drawer').classList.remove('translate-x-full');
+            document.getElementById('catalog-drawer').classList.add('translate-x-0');
+            renderCatalogItems();
+        }
+
+        function closeCatalogDrawer() {
+            document.getElementById('catalog-modal-backdrop').classList.add('pointer-events-none', 'opacity-0');
+            document.getElementById('catalog-modal-backdrop').classList.remove('opacity-100');
+            document.getElementById('catalog-drawer').classList.add('translate-x-full');
+            document.getElementById('catalog-drawer').classList.remove('translate-x-0');
+        }
+
+        function renderCatalogItems() {
+            const cont = document.getElementById('catalog-items-container');
+            const search = document.getElementById('catalog-search').value.toLowerCase().trim();
+            cont.innerHTML = '';
+
+            const filtered = CAA_DATA.filter(i => 
+                !search || i.nameAr.toLowerCase().includes(search) || i.nameEn.toLowerCase().includes(search) || i.code.toLowerCase().includes(search)
+            );
+
+            filtered.forEach(item => {
+                const card = document.createElement('div');
+                card.onclick = () => {
+                    closeCatalogDrawer();
+                    focusOnItem(item.id);
+                };
+                card.className = 'p-2.5 rounded-xl glass-dock hover:bg-cyan-900/40 border border-slate-700/60 cursor-pointer flex items-center justify-between transition-all';
+                card.innerHTML = `
+                    <div>
+                        <div class="flex items-center gap-1.5 mb-0.5">
+                            <span class="text-[9px] font-mono font-bold px-1 rounded bg-slate-800 text-cyan-400">${item.code}</span>
+                            <span class="text-[10px] text-slate-400">${item.cat}</span>
+                        </div>
+                        <div class="text-xs font-bold text-white">${item.nameAr}</div>
+                    </div>
+                    <svg class="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path></svg>
+                `;
+                cont.appendChild(card);
+            });
+        }
+
+        function filterCatalogList() {
+            renderCatalogItems();
+        }
+
+        /* --- أنماط الإضاءة (معرض / نهاري / ليلي ملاحي) --- */
+        function cycleLightingMode() {
+            playChirp();
+            lightModeIndex = (lightModeIndex + 1) % LIGHT_MODES.length;
+            const mode = LIGHT_MODES[lightModeIndex];
+            const textEl = document.getElementById('light-mode-text');
+
+            if (mode === 'exhibition') {
+                textEl.innerText = 'إضاءة المعرض';
+                scene.background = new THREE.Color(0x060B12);
+                ambientLight.intensity = 0.65;
+                sunLight.intensity = 0.85;
+                sunLight.color.setHex(0xFFF7ED);
+                spotTable.intensity = 1.8;
+                spotTower.intensity = 1.6;
+                runwayLights.forEach(l => l.visible = false);
+            } else if (mode === 'day') {
+                textEl.innerText = 'نهاري ساطع';
+                scene.background = new THREE.Color(0x132130);
+                ambientLight.intensity = 0.95;
+                sunLight.intensity = 1.6;
+                sunLight.color.setHex(0xFFFFFF);
+                spotTable.intensity = 0.4;
+                spotTower.intensity = 0.4;
+                runwayLights.forEach(l => l.visible = false);
+            } else if (mode === 'night') {
+                textEl.innerText = 'ليلي ملاحي';
+                scene.background = new THREE.Color(0x020509);
+                ambientLight.intensity = 0.15;
+                sunLight.intensity = 0.1;
+                spotTable.intensity = 0.5;
+                spotTower.intensity = 0.7;
+                runwayLights.forEach(l => l.visible = true);
+            }
+        }
+
+        /* --- التمييز الدقيق بين التدوير والنقر (Click vs Drag) --- */
+        const raycaster = new THREE.Raycaster();
+        const pointer = new THREE.Vector2();
+        let pointerDownPos = { x: 0, y: 0 };
+        const DRAG_THRESHOLD = 8; // بكسل
+
+        function setupInteractions() {
+            const canvas = document.getElementById('webgl-canvas');
+
+            canvas.addEventListener('pointerdown', (e) => {
+                pointerDownPos.x = e.clientX;
+                pointerDownPos.y = e.clientY;
+            }, { passive: true });
+
+            canvas.addEventListener('pointerup', (e) => {
+                const dist = Math.hypot(e.clientX - pointerDownPos.x, e.clientY - pointerDownPos.y);
+                if (dist > DRAG_THRESHOLD) return; // المستخدم كان يدور المشهد
+
+                const rect = canvas.getBoundingClientRect();
+                pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+                pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+
+                raycaster.setFromCamera(pointer, camera);
+                const intersects = raycaster.intersectObjects(interactiveMeshes, true);
+
+                if (intersects.length > 0) {
+                    for (let hit of intersects) {
+                        const rootId = hit.object.userData.id || (hit.object.userData.parentGroup ? hit.object.userData.parentGroup.userData.id : null);
+                        if (rootId) {
+                            focusOnItem(rootId);
+                            return;
+                        }
+                    }
+                }
+            });
+        }
+
+        /* --- تهيئة محرك العرض وتدوير المشهد --- */
+        function init() {
+            const canvas = document.getElementById('webgl-canvas');
+
+            // المشهد ثلاثي الأبعاد
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x060B12);
+            scene.fog = new THREE.FogExp2(0x060B12, 0.015);
+
+            // الكاميرا
+            camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 220);
+            camera.position.set(1.5, 27, 32); // وضع البداية: كامل المجسم متناسق
+
+            // الريندرر
+            renderer = new THREE.WebGLRenderer({
+                canvas: canvas,
+                antialias: true,
+                powerPreference: 'high-performance'
+            });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+            // تحكم OrbitControls معدل للمس المتعدد فائق السلاسة
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.08;
+            controls.rotateSpeed = 0.85;
+            controls.zoomSpeed = 1.2;
+            controls.panSpeed = 0.85;
+            controls.touches = {
+                ONE: THREE.TOUCH.ROTATE,
+                TWO: THREE.TOUCH.DOLLY_PAN
+            };
+            controls.maxPolarAngle = Math.PI / 2.05;
+            controls.minDistance = 3.5;
+            controls.maxDistance = 70.0;
+            controls.target.set(1.5, 1.5, 0);
+
+            // الإضاءة
+            ambientLight = new THREE.AmbientLight(0xFFFFFF, 0.65);
+            scene.add(ambientLight);
+
+            sunLight = new THREE.DirectionalLight(0xFFF7ED, 0.85);
+            sunLight.position.set(16, 25, 14);
+            sunLight.castShadow = true;
+            sunLight.shadow.mapSize.set(2048, 2048);
+            scene.add(sunLight);
+
+            spotTable = new THREE.SpotLight(0xFFE4B5, 1.8, 45, Math.PI / 3, 0.4);
+            spotTable.position.set(-2, 22, 6);
+            spotTower = new THREE.SpotLight(0xE0F2FE, 1.6, 40, Math.PI / 4, 0.3);
+            spotTower.position.set(18, 20, 4);
+            scene.add(spotTable, spotTower);
+
+            // بناء العناصر
+            buildAirfieldScene();
+            create3DPins();
+            setupInteractions();
+
+            window.addEventListener('resize', onWindowResize, false);
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            update3DPinsPosition();
+        }
+
+        const clock = new THREE.Clock();
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const dt = clock.getDelta();
+            const elapsed = clock.getElapsedTime();
+
+            // دوران هوائي رادار الاستطلاع
+            if (radarSweeper) {
+                radarSweeper.rotation.y += dt * 1.8;
+            }
+
+            // وميض أضواء صواري الاتصالات وأبراج المراقبة
+            if (beaconLights.length > 0) {
+                const pulse = Math.sin(elapsed * 4.5) > 0.2 ? 2.5 : 0.2;
+                beaconLights.forEach(b => {
+                    b.material.emissiveIntensity = pulse;
+                });
+            }
+
+            // توهج حلقات القواعد المضيئة
+            if (pedestalRings.length > 0) {
+                const ringGlow = 0.8 + 0.3 * Math.sin(elapsed * 3.0);
+                pedestalRings.forEach(r => {
+                    r.material.color.setRGB(1.0 * ringGlow, 0.88 * ringGlow, 0.5 * ringGlow);
+                });
+            }
+
+            // أنيميشن حركة الكاميرا عند النقر
+            if (isCamTweening) {
+                tweenProgress += dt / tweenDuration;
+                if (tweenProgress >= 1.0) {
+                    tweenProgress = 1.0;
+                    isCamTweening = false;
+                    controls.enabled = true;
+                }
+                const t = 1 - Math.pow(1 - tweenProgress, 3);
+                camera.position.lerpVectors(tweenStartPos, tweenEndPos, t);
+                controls.target.lerpVectors(tweenStartLook, tweenEndLook, t);
+            }
+
+            controls.update();
+            renderer.render(scene, camera);
+            update3DPinsPosition();
+        }
+
+        window.onload = function() {
+            init();
+            animate();
+        };
+    </script>
+</body>
+</html>
